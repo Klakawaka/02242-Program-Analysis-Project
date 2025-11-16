@@ -106,32 +106,372 @@ def step(state: State) -> State | str:
             frame.stack.push(v)
             frame.pc += 1
             return state
-        case jvm.Load(type=jvm.Int(), index=i):
-            frame.stack.push(frame.locals[i])
+        
+        case jvm.Load(type=t, index=i):
+            # Handle all types: Int, Boolean, Reference, etc.
+            if i in frame.locals:
+                frame.stack.push(frame.locals[i])
+            else:
+                # Default value for uninitialized locals
+                if isinstance(t, jvm.Int):
+                    frame.stack.push(jvm.Value.int(0))
+                elif isinstance(t, jvm.Boolean):
+                    frame.stack.push(jvm.Value.boolean(False))
+                elif isinstance(t, (jvm.Reference, jvm.Object)):
+                    frame.stack.push(jvm.Value(t, None))
+                else:
+                    raise NotImplementedError(f"Load for type {t} not implemented")
             frame.pc += 1
             return state
-        case jvm.Binary(type=jvm.Int(), operant=jvm.BinaryOpr.Div):
+        
+        case jvm.Store(type=t, index=i):
+            # Store value from stack to local variable
+            value = frame.stack.pop()
+            frame.locals[i] = value
+            frame.pc += 1
+            return state
+        
+        case jvm.Binary(type=jvm.Int(), operant=op):
             v2, v1 = frame.stack.pop(), frame.stack.pop()
             assert v1.type is jvm.Int(), f"expected int, but got {v1}"
             assert v2.type is jvm.Int(), f"expected int, but got {v2}"
-            if v2.value == 0:
-                return "divide by zero"
-
-            frame.stack.push(jvm.Value.int(v1.value // v2.value))
+            
+            match op:
+                case jvm.BinaryOpr.Div:
+                    if v2.value == 0:
+                        return "divide by zero"
+                    frame.stack.push(jvm.Value.int(v1.value // v2.value))
+                case jvm.BinaryOpr.Add:
+                    frame.stack.push(jvm.Value.int(v1.value + v2.value))
+                case jvm.BinaryOpr.Sub:
+                    frame.stack.push(jvm.Value.int(v1.value - v2.value))
+                case jvm.BinaryOpr.Mul:
+                    frame.stack.push(jvm.Value.int(v1.value * v2.value))
+                case jvm.BinaryOpr.Rem:
+                    if v2.value == 0:
+                        return "divide by zero"
+                    frame.stack.push(jvm.Value.int(v1.value % v2.value))
+                case _:
+                    raise NotImplementedError(f"Binary operation {op} not implemented")
+            
             frame.pc += 1
             return state
-        case jvm.Return(type=jvm.Int()):
-            v1 = frame.stack.pop()
-            state.frames.pop()
-            if state.frames:
-                frame = state.frames.peek()
-                frame.stack.push(v1)
+        
+        case jvm.If(condition=cond, target=target):
+            # Conditional jump: compare two values
+            v2, v1 = frame.stack.pop(), frame.stack.pop()
+            
+            # Determine if condition is true
+            condition_true = False
+            if isinstance(v1.type, jvm.Int) and isinstance(v2.type, jvm.Int):
+                match cond:
+                    case "eq": condition_true = v1.value == v2.value
+                    case "ne": condition_true = v1.value != v2.value
+                    case "lt": condition_true = v1.value < v2.value
+                    case "le": condition_true = v1.value <= v2.value
+                    case "gt": condition_true = v1.value > v2.value
+                    case "ge": condition_true = v1.value >= v2.value
+                    case _: raise NotImplementedError(f"If condition {cond} not implemented")
+            elif isinstance(v1.type, (jvm.Reference, jvm.Object)) and isinstance(v2.type, (jvm.Reference, jvm.Object)):
+                match cond:
+                    case "is": condition_true = v1.value is v2.value
+                    case "isnot": condition_true = v1.value is not v2.value
+                    case _: raise NotImplementedError(f"If condition {cond} for references not implemented")
+            
+            if condition_true:
+                frame.pc = PC(frame.pc.method, target)
+            else:
+                frame.pc += 1
+            return state
+        
+        case jvm.Ifz(condition=cond, target=target):
+            # Conditional jump: compare value with zero/null
+            v = frame.stack.pop()
+            
+            condition_true = False
+            if isinstance(v.type, jvm.Int):
+                match cond:
+                    case "eq": condition_true = v.value == 0
+                    case "ne": condition_true = v.value != 0
+                    case "lt": condition_true = v.value < 0
+                    case "le": condition_true = v.value <= 0
+                    case "gt": condition_true = v.value > 0
+                    case "ge": condition_true = v.value >= 0
+                    case _: raise NotImplementedError(f"Ifz condition {cond} not implemented")
+            elif isinstance(v.type, (jvm.Reference, jvm.Object)):
+                match cond:
+                    case "is": condition_true = v.value is None
+                    case "isnot": condition_true = v.value is not None
+                    case _: raise NotImplementedError(f"Ifz condition {cond} for references not implemented")
+            
+            if condition_true:
+                frame.pc = PC(frame.pc.method, target)
+            else:
+                frame.pc += 1
+            return state
+        
+        case jvm.Goto(target=target):
+            # Unconditional jump
+            frame.pc = PC(frame.pc.method, target)
+            return state
+        
+        case jvm.New(classname=cn):
+            # Create a new object instance
+            # For AssertionError, we create a special marker
+            class_name_str = str(cn)
+            if "AssertionError" in class_name_str:
+                # Push a reference that we can identify as AssertionError
+                # We'll use a special string marker
+                frame.stack.push(jvm.Value(jvm.Reference(), "AssertionError"))
+            else:
+                # For other objects, push a generic reference
+                # In a full implementation, we'd allocate heap space
+                frame.stack.push(jvm.Value(jvm.Reference(), f"Object:{class_name_str}"))
+            frame.pc += 1
+            return state
+        
+        case jvm.Dup(words=w):
+            # Duplicate the top value(s) on the stack
+            # For now, we only handle dup (words=1)
+            if w == 1:
+                if not frame.stack:
+                    raise RuntimeError("Cannot dup: stack is empty")
+                top_value = frame.stack.peek()
+                frame.stack.push(top_value)
                 frame.pc += 1
                 return state
             else:
-                return "ok"
+                raise NotImplementedError(f"Dup with words={w} not implemented")
+        
+        case jvm.Get(static=True, field=f):
+            # Handle static field access (like $assertionsDisabled)
+            if f.extension.name == "$assertionsDisabled":
+                # Assertions are enabled by default in JPAMB (we run with -ea)
+                # So $assertionsDisabled is False
+                frame.stack.push(jvm.Value.boolean(False))
+                frame.pc += 1
+                return state
+            raise NotImplementedError(f"Static field {f} not implemented")
+        
+        case jvm.Get(static=False, field=f):
+            # Instance field access
+            obj_ref = frame.stack.pop()
+            if obj_ref.value is None:
+                return "null pointer"
+            raise NotImplementedError(f"Instance field {f} not implemented")
+        
+        case jvm.Throw():
+            # Handle throw opcode (for assertions and exceptions)
+            exception_obj = frame.stack.pop()
+            if exception_obj.value is None:
+                return "null pointer"
+            
+            # Check if it's an AssertionError
+            exception_str = str(exception_obj.value)
+            if exception_obj.value == "AssertionError" or "AssertionError" in exception_str:
+                return "assertion error"
+            
+            # For other exceptions, we'll just return a generic error
+            # In a full implementation, we'd check the exception type
+            return "assertion error"  # Default for now
+        
+        case jvm.InvokeVirtual(method=m):
+            # Handle virtual method invocations (including String methods)
+            args = []
+            param_count = len(m.methodid.params)
+            for _ in range(param_count):
+                args.insert(0, frame.stack.pop())
+            
+            # Pop object reference
+            obj_ref = frame.stack.pop()
+            if obj_ref.value is None:
+                return "null pointer"
+            
+            result = handle_method_invocation(m, obj_ref, args)
+            if isinstance(result, str):
+                return result  # Error result
+            if result is not None:
+                frame.stack.push(result)
+                frame.pc += 1
+                return state
+            raise NotImplementedError(f"Method invocation {m} not implemented")
+        
+        case jvm.InvokeStatic(method=m):
+            # Handle static method invocations
+            args = []
+            param_count = len(m.methodid.params)
+            for _ in range(param_count):
+                args.insert(0, frame.stack.pop())
+            
+            # No object reference for static methods
+            result = handle_method_invocation(m, None, args)
+            if isinstance(result, str):
+                return result  # Error result
+            if result is not None:
+                frame.stack.push(result)
+                frame.pc += 1
+                return state
+            raise NotImplementedError(f"Static method invocation {m} not implemented")
+        
+        case jvm.InvokeSpecial(method=m):
+            # Handle special method invocations (constructors, private methods)
+            args = []
+            param_count = len(m.methodid.params)
+            for _ in range(param_count):
+                args.insert(0, frame.stack.pop())
+            
+            # Pop object reference
+            obj_ref = frame.stack.pop()
+            if obj_ref.value is None:
+                return "null pointer"
+            
+            # Check if it's a constructor
+            if m.methodid.name == "<init>":
+                # Constructors don't return a value, they just initialize the object
+                # The object reference stays on the stack
+                result = handle_method_invocation(m, obj_ref, args)
+                if isinstance(result, str):
+                    return result  # Error result
+                # Push the object reference back (constructor doesn't return, but object stays)
+                frame.stack.push(obj_ref)
+                frame.pc += 1
+                return state
+            else:
+                # Regular method call
+                result = handle_method_invocation(m, obj_ref, args)
+                if isinstance(result, str):
+                    return result  # Error result
+                if result is not None:
+                    frame.stack.push(result)
+                    frame.pc += 1
+                    return state
+            raise NotImplementedError(f"Special method invocation {m} not implemented")
+        
+        case jvm.Return(type=t):
+            if t is None:
+                # Void return
+                state.frames.pop()
+                if state.frames:
+                    frame = state.frames.peek()
+                    frame.pc += 1
+                    return state
+                else:
+                    return "ok"
+            else:
+                # Return with value
+                v1 = frame.stack.pop()
+                state.frames.pop()
+                if state.frames:
+                    frame = state.frames.peek()
+                    frame.stack.push(v1)
+                    frame.pc += 1
+                    return state
+                else:
+                    return "ok"
+        
         case a:
             raise NotImplementedError(f"Don't know how to handle: {a!r}")
+
+
+def handle_method_invocation(m: jvm.AbsMethodID, obj_ref: jvm.Value | None, args: list[jvm.Value]) -> jvm.Value | str | None:
+    """Handle method invocations including String methods and assertions"""
+    class_name_str = str(m.classname)
+    method_name = m.methodid.name
+    
+    # Handle AssertionError constructor
+    # When <init> is called on an AssertionError object, we keep the AssertionError marker
+    if "AssertionError" in class_name_str and method_name == "<init>":
+        # Constructor doesn't return a value, but we need to keep the object reference
+        # The object reference is already on the stack, we just need to return None
+        # to indicate the constructor was handled (no return value)
+        return None  # Constructor handled, object stays on stack
+    
+    # Handle String methods - check for java/lang/String or just String
+    if "String" in class_name_str or class_name_str.endswith("String"):
+        return handle_string_method(method_name, obj_ref, args, m.methodid.return_type)
+    
+    return None  # Not handled
+
+
+def handle_string_method(method_name: str, obj_ref: jvm.Value | None, args: list[jvm.Value], return_type: jvm.Type | None) -> jvm.Value | str | None:
+    """Handle String method invocations"""
+    if obj_ref is None:
+        return "null pointer"
+    
+    string_value = obj_ref.value
+    if not isinstance(string_value, str):
+        # If it's a Reference but not a string, we might need to handle it differently
+        # For now, assume it could be a string
+        if string_value is None:
+            return "null pointer"
+        string_value = str(string_value)
+    
+    match method_name:
+        case "length":
+            # String.length() -> int
+            if len(args) == 0:
+                return jvm.Value.int(len(string_value))
+        
+        case "charAt":
+            # String.charAt(int) -> char
+            if len(args) == 1 and isinstance(args[0].type, jvm.Int):
+                index = args[0].value
+                if index < 0 or index >= len(string_value):
+                    return "out of bounds"
+                return jvm.Value.char(string_value[index])
+        
+        case "equals":
+            # String.equals(Object) -> boolean
+            if len(args) == 1:
+                other = args[0].value
+                if other is None:
+                    return jvm.Value.boolean(False)
+                return jvm.Value.boolean(string_value == str(other))
+        
+        case "isEmpty":
+            # String.isEmpty() -> boolean
+            if len(args) == 0:
+                return jvm.Value.boolean(len(string_value) == 0)
+        
+        case "substring":
+            # String.substring(int) or String.substring(int, int) -> String
+            if len(args) == 1 and isinstance(args[0].type, jvm.Int):
+                begin = args[0].value
+                if begin < 0 or begin > len(string_value):
+                    return "out of bounds"
+                result_str = string_value[begin:]
+                return jvm.Value(jvm.Reference(), result_str)
+            elif len(args) == 2 and isinstance(args[0].type, jvm.Int) and isinstance(args[1].type, jvm.Int):
+                begin = args[0].value
+                end = args[1].value
+                if begin < 0 or end > len(string_value) or begin > end:
+                    return "out of bounds"
+                result_str = string_value[begin:end]
+                return jvm.Value(jvm.Reference(), result_str)
+        
+        case "indexOf":
+            # String.indexOf(String) -> int
+            if len(args) == 1:
+                other = args[0].value
+                if other is None:
+                    return "null pointer"
+                try:
+                    index = string_value.index(str(other))
+                    return jvm.Value.int(index)
+                except ValueError:
+                    return jvm.Value.int(-1)
+        
+        case "concat":
+            # String.concat(String) -> String
+            if len(args) == 1:
+                other = args[0].value
+                if other is None:
+                    return "null pointer"
+                result_str = string_value + str(other)
+                return jvm.Value(jvm.Reference(), result_str)
+        
+        case _:
+            return None  # Method not handled, let caller raise NotImplementedError
 
 
 frame = Frame.from_method(methodid)

@@ -141,6 +141,9 @@ class Type(ABC):
                     return Short()
                 case "ref":
                     return Reference()
+                case "string":
+                    # String literals in Java are objects (references)
+                    return Reference()
                 case "boolean":
                     return Boolean()
         if "base" in json:
@@ -149,6 +152,10 @@ class Type(ABC):
             match json["kind"]:
                 case "array":
                     return Array(Type.from_json(json["type"]))
+                case "class":
+                    # Class types are references to objects
+                    # For String and other classes, we use Reference type
+                    return Reference()
                 case kind:
                     raise NotImplementedError(
                         f"Unknown kind {kind}, in Type.from_json: {json!r}"

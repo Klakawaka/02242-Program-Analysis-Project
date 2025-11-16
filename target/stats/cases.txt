@@ -63,5 +63,34 @@ jpamb.cases.Simple.justReturn:()I                            () -> ok
 jpamb.cases.Simple.justReturnNothing:()V                     () -> ok
 jpamb.cases.Simple.multiError:(Z)I                           (false) -> assertion error
 jpamb.cases.Simple.multiError:(Z)I                           (true) -> divide by zero
+jpamb.cases.Strings.emptyStringCharAt:()V                    () -> out of bounds
+jpamb.cases.Strings.emptyStringLength:()V                    () -> ok
+jpamb.cases.Strings.nonEmptyStringIsEmpty:()V                () -> assertion error
+jpamb.cases.Strings.stringCharAt:()V                         () -> ok
+jpamb.cases.Strings.stringCharAtLast:()V                     () -> ok
+jpamb.cases.Strings.stringCharAtLength:()V                   () -> out of bounds
+jpamb.cases.Strings.stringCharAtNegative:()V                 () -> out of bounds
+jpamb.cases.Strings.stringCharAtOutOfBounds:()V              () -> out of bounds
+jpamb.cases.Strings.stringConcat:()V                         () -> ok
+jpamb.cases.Strings.stringConcatNull:()V                     () -> null pointer
+jpamb.cases.Strings.stringEquals:()V                         () -> ok
+jpamb.cases.Strings.stringEqualsNull:()V                     () -> ok
+jpamb.cases.Strings.stringEqualsOnNull:()V                   () -> null pointer
+jpamb.cases.Strings.stringIndexOf:()V                        () -> ok
+jpamb.cases.Strings.stringIndexOfNotFound:()V                () -> ok
+jpamb.cases.Strings.stringIndexOfNull:()V                    () -> null pointer
+jpamb.cases.Strings.stringIsEmpty:()V                        () -> ok
+jpamb.cases.Strings.stringIsNull:()V                         () -> null pointer
+jpamb.cases.Strings.stringIsNullCharAt:()V                   () -> null pointer
+jpamb.cases.Strings.stringLength:()V                         () -> ok
+jpamb.cases.Strings.stringNotEquals:()V                      () -> assertion error
+jpamb.cases.Strings.stringSubstring:()V                      () -> ok
+jpamb.cases.Strings.stringSubstringEmpty:()V                 () -> ok
+jpamb.cases.Strings.stringSubstringNegative:()V              () -> out of bounds
+jpamb.cases.Strings.stringSubstringOutOfBounds:()V           () -> out of bounds
+jpamb.cases.Strings.stringSubstringToEnd:()V                 () -> ok
+jpamb.cases.Strings.stringSubstringWrongOrder:()V            () -> assertion error
+jpamb.cases.Strings.stringWithSpecialCharacters:()V          () -> ok
+jpamb.cases.Strings.stringWithUnicode:()V                    () -> ok
 jpamb.cases.Tricky.collatz:(I)V                              (0) -> assertion error
 jpamb.cases.Tricky.collatz:(I)V                              (24) -> ok
