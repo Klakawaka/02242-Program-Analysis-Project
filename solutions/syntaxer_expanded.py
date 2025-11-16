@@ -170,16 +170,28 @@ array_access_found = False
 array_length_found = False
 array_null_assignment = False
 
-for capture_name, node in tree_sitter.QueryCursor(array_access_q).captures(body).items():
-    if capture_name == "array-access":
-        array_access_found = True
-        log.debug("Found array access")
-    elif capture_name == "field-access":
-        # Check if it's array.length
-        for cn, n in tree_sitter.QueryCursor(array_access_q).captures(node):
-            if cn == "field-name" and n.text.decode() == "length":
+array_captures = tree_sitter.QueryCursor(array_access_q).captures(body)
+if "array-access" in array_captures:
+    array_access_found = True
+    log.debug("Found array access")
+
+if "field-access" in array_captures:
+    # Check if it's array.length - need to check field-name from the same query
+    # Re-run query to get field-name captures
+    field_name_q = tree_sitter.Query(
+        JAVA_LANGUAGE,
+        """
+        (field_access
+            field: (identifier) @field-name) @field-access
+    """,
+    )
+    field_captures = tree_sitter.QueryCursor(field_name_q).captures(body)
+    if "field-name" in field_captures:
+        for field_node in field_captures["field-name"]:
+            if field_node.text and field_node.text.decode() == "length":
                 array_length_found = True
                 log.debug("Found array.length access")
+                break
 
 # Check for null assignments: array = null
 null_assignment_q = tree_sitter.Query(
@@ -191,17 +203,27 @@ null_assignment_q = tree_sitter.Query(
 """,
 )
 
-for capture_name, node in tree_sitter.QueryCursor(null_assignment_q).captures(body).items():
-    if capture_name == "null-assign":
-        left_text = ""
-        for cn, n in tree_sitter.QueryCursor(null_assignment_q).captures(node):
-            if cn == "left":
-                left_text = n.text.decode() if n.text else ""
+null_captures = tree_sitter.QueryCursor(null_assignment_q).captures(body)
+# Get left side from null assignments
+left_q = tree_sitter.Query(
+    JAVA_LANGUAGE,
+    """
+    (assignment_expression
+        left: (_) @left
+        right: (null_literal)) @null-assign
+""",
+)
+left_captures = tree_sitter.QueryCursor(left_q).captures(body)
+
+if "null-assign" in null_captures:
+    if "left" in left_captures:
+        for left_node in left_captures["left"]:
+            left_text = left_node.text.decode() if left_node.text else ""
+            # Check if it's an array variable
+            if "[]" in left_text or "array" in left_text.lower():
+                array_null_assignment = True
+                log.debug("Found array null assignment")
                 break
-        # Check if it's an array variable
-        if "[]" in left_text or "array" in left_text.lower():
-            array_null_assignment = True
-            log.debug("Found array null assignment")
 
 if array_null_assignment:
     patterns["null pointer"] = 0.7
@@ -229,31 +251,28 @@ string_method_q = tree_sitter.Query(
 string_methods = set()
 string_null_assignment = False
 
-for capture_name, node in tree_sitter.QueryCursor(string_method_q).captures(body).items():
-    if capture_name == "string-call":
-        method_name_node = None
-        for cn, n in tree_sitter.QueryCursor(string_method_q).captures(node):
-            if cn == "method-name":
-                method_name_node = n
-                break
-        if method_name_node:
-            method_name = method_name_node.text.decode()
-            # Common String methods that can cause errors
-            if method_name in ["charAt", "substring", "indexOf", "equals", "concat", "length"]:
-                string_methods.add(method_name)
-                log.debug(f"Found String method: {method_name}")
+# Get string method calls
+string_captures = tree_sitter.QueryCursor(string_method_q).captures(body)
+if "string-call" in string_captures:
+    # Get method names from the same query
+    if "method-name" in string_captures:
+        for method_name_node in string_captures["method-name"]:
+            if method_name_node.text:
+                method_name = method_name_node.text.decode()
+                # Common String methods that can cause errors
+                if method_name in ["charAt", "substring", "indexOf", "equals", "concat", "length"]:
+                    string_methods.add(method_name)
+                    log.debug(f"Found String method: {method_name}")
 
 # Check for String null assignments: String str = null
-for capture_name, node in tree_sitter.QueryCursor(null_assignment_q).captures(body).items():
-    if capture_name == "null-assign":
-        left_text = ""
-        for cn, n in tree_sitter.QueryCursor(null_assignment_q).captures(node):
-            if cn == "left":
-                left_text = n.text.decode() if n.text else ""
-                break
+# Reuse the left_captures from array null assignment check above
+if "left" in left_captures:
+    for left_node in left_captures["left"]:
+        left_text = left_node.text.decode() if left_node.text else ""
         if "String" in left_text or "str" in left_text.lower():
             string_null_assignment = True
             log.debug("Found String null assignment")
+            break
 
 if string_null_assignment:
     patterns["null pointer"] = max(patterns.get("null pointer", 0), 0.8)
