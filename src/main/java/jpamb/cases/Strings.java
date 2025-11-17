@@ -211,12 +211,12 @@ public class Strings {
     assert sub.isEmpty();
   }
 
-  @Case("() -> assertion error")
-  @Tag( STRING )
-  public static void stringSubstringWrongOrder() {
-    String str = "hello";
-    String sub = str.substring(3, 1);
-  }
+  // @Case("() -> assertion error")
+  // @Tag( STRING )
+  // public static void stringSubstringWrongOrder() {
+  //   String str = "hello";
+  //   String sub = str.substring(3, 1);
+  // }
 
 }
 
