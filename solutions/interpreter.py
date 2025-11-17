@@ -157,54 +157,79 @@ def step(state: State) -> State | str:
             frame.pc += 1
             return state
         
-        case jvm.If(condition=cond, target=target):
-            # Conditional jump: compare two values
-            v2, v1 = frame.stack.pop(), frame.stack.pop()
+        case jvm.Ifz(condition=cond, target=target):
+            # Conditional jump based on single value (compare with zero)
+            value = frame.stack.pop()
             
-            # Determine if condition is true
-            condition_true = False
-            if isinstance(v1.type, jvm.Int) and isinstance(v2.type, jvm.Int):
-                match cond:
-                    case "eq": condition_true = v1.value == v2.value
-                    case "ne": condition_true = v1.value != v2.value
-                    case "lt": condition_true = v1.value < v2.value
-                    case "le": condition_true = v1.value <= v2.value
-                    case "gt": condition_true = v1.value > v2.value
-                    case "ge": condition_true = v1.value >= v2.value
-                    case _: raise NotImplementedError(f"If condition {cond} not implemented")
-            elif isinstance(v1.type, (jvm.Reference, jvm.Object)) and isinstance(v2.type, (jvm.Reference, jvm.Object)):
-                match cond:
-                    case "is": condition_true = v1.value is v2.value
-                    case "isnot": condition_true = v1.value is not v2.value
-                    case _: raise NotImplementedError(f"If condition {cond} for references not implemented")
+            # Get the actual integer value for comparison
+            if isinstance(value.type, jvm.Boolean):
+                int_val = 1 if value.value else 0
+            elif isinstance(value.type, jvm.Char):
+                int_val = ord(value.value) if isinstance(value.value, str) else value.value
+            else:
+                int_val = value.value
             
-            if condition_true:
+            should_jump = False
+            match cond:
+                case "eq":
+                    should_jump = (int_val == 0)
+                case "ne":
+                    should_jump = (int_val != 0)
+                case "lt":
+                    should_jump = (int_val < 0)
+                case "le":
+                    should_jump = (int_val <= 0)
+                case "gt":
+                    should_jump = (int_val > 0)
+                case "ge":
+                    should_jump = (int_val >= 0)
+                case _:
+                    raise NotImplementedError(f"Unknown ifz condition: {cond}")
+            
+            if should_jump:
                 frame.pc = PC(frame.pc.method, target)
             else:
                 frame.pc += 1
             return state
         
-        case jvm.Ifz(condition=cond, target=target):
-            # Conditional jump: compare value with zero/null
-            v = frame.stack.pop()
+        case jvm.If(condition=cond, target=target):
+            # Conditional jump based on two values
+            value2 = frame.stack.pop()
+            value1 = frame.stack.pop()
             
-            condition_true = False
-            if isinstance(v.type, jvm.Int):
-                match cond:
-                    case "eq": condition_true = v.value == 0
-                    case "ne": condition_true = v.value != 0
-                    case "lt": condition_true = v.value < 0
-                    case "le": condition_true = v.value <= 0
-                    case "gt": condition_true = v.value > 0
-                    case "ge": condition_true = v.value >= 0
-                    case _: raise NotImplementedError(f"Ifz condition {cond} not implemented")
-            elif isinstance(v.type, (jvm.Reference, jvm.Object)):
-                match cond:
-                    case "is": condition_true = v.value is None
-                    case "isnot": condition_true = v.value is not None
-                    case _: raise NotImplementedError(f"Ifz condition {cond} for references not implemented")
+            # Get actual values for comparison
+            def get_comparable_value(val):
+                if isinstance(val.type, jvm.Boolean):
+                    return 1 if val.value else 0
+                elif isinstance(val.type, jvm.Char):
+                    # For char comparison, use the integer value (ASCII/Unicode)
+                    if isinstance(val.value, str):
+                        return ord(val.value)
+                    return val.value
+                else:
+                    return val.value
             
-            if condition_true:
+            v1 = get_comparable_value(value1)
+            v2 = get_comparable_value(value2)
+            
+            should_jump = False
+            match cond:
+                case "eq":
+                    should_jump = (v1 == v2)
+                case "ne":
+                    should_jump = (v1 != v2)
+                case "lt":
+                    should_jump = (v1 < v2)
+                case "le":
+                    should_jump = (v1 <= v2)
+                case "gt":
+                    should_jump = (v1 > v2)
+                case "ge":
+                    should_jump = (v1 >= v2)
+                case _:
+                    raise NotImplementedError(f"Unknown if condition: {cond}")
+            
+            if should_jump:
                 frame.pc = PC(frame.pc.method, target)
             else:
                 frame.pc += 1
